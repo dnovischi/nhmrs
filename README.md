@@ -1,19 +1,41 @@
-# Multi-Unicycle Environment
+# NHMRS - Non-Holonomic Mobile Robot Systems Environments
 
-A custom PettingZoo environment for multi-agent unicycle robots with continuous control.
+A collection of [PettingZoo](https://pettingzoo.farama.org/) environments for multi-agent reinforcement learning with Non-Holonomic Mobile Robot Systems (NHMRS). These environments focus on task allocation problems where agents must coordinate to efficiently assign themselves to tasks.
+
+## Environments
+
+### Simple Assignment (`simple_assignment_v0`)
+
+A basic task allocation environment where non-holonomic agents (unicycle model) must be assigned to task locations to minimize total cost (e.g., travel distance or time).
 
 ## Features
 
-- **Unicycle dynamics**: Agents move with continuous actions `[v, ω]` (velocity, angular velocity)
-- **Arrowhead rendering**: Robots visualized as oriented arrows (similar to MPE)
-- **Auto-zoom camera**: View automatically adjusts to fit all entities
-- **Scenario-based**: Configurable initial positions and world setup
-- **Unbounded world**: No boundaries, camera follows agents
+- **Non-holonomic dynamics**: Unicycle kinematic model with continuous control `[v, ω]`
+- **Task allocation**: Simple assignment problem with n agents and m tasks
+- **PettingZoo compatibility**: Standard parallel environment interface
+- **Visual rendering**: Real-time visualization with auto-zoom camera
+- **Configurable scenarios**: Customizable agent counts, task locations, and world setup
 
 ## Installation
 
+### From Source
+
 ```bash
-pip install -r requirements.txt
+# Clone the repository
+git clone https://github.com/yourusername/nhmrs.git
+cd nhmrs
+
+# Install in development mode
+pip install -e .
+
+# Or install with development dependencies
+pip install -e ".[dev]"
+```
+
+### Via pip (when published)
+
+```bash
+pip install nhmrs
 ```
 
 ## Quick Start
@@ -39,28 +61,50 @@ e.close()
 
 ## Demo
 
-Run the included demo to see 3 robots moving in circles:
+Run the included demo to see 3 robots with circular motion policies:
 
 ```bash
 python demo.py
 ```
 
+The demo shows agents (colored arrowheads) moving toward task locations (red circles).
+
 ## Project Structure
 
 ```
 nhmrs/
-├── simple_assignment/
-│   ├── env/
-│   │   ├── __init__.py
-│   │   ├── simple_assignment.py  # Main environment
-│   │   ├── rendering.py          # Custom pyglet renderer
-│   │   └── scenario.py           # Scenario configuration
+├── simple_assignment/              # Simple assignment environment
 │   ├── __init__.py
-│   └── simple_assignment_v0.py   # Versioned entry point
-├── demo.py                        # Example demo
-├── README.md
-└── requirements.txt
+│   ├── simple_assignment_v0.py    # Environment entry point
+│   └── env/
+│       ├── __init__.py
+│       ├── simple_assignment.py   # Core environment logic
+│       ├── rendering.py           # Visualization
+│       └── scenario.py            # Initial configuration
+├── demo.py                        # Demo script
+├── requirements.txt               # Dependencies
+├── setup.py                       # Setup script
+├── pyproject.toml                 # Modern Python config
+└── README.md                      # This file
 ```
+
+### Adding New Environments
+
+To add a new environment to the package:
+
+1. Create a new directory: `nhmrs/new_environment/`
+2. Structure it following PettingZoo conventions:
+   ```
+   new_environment/
+   ├── __init__.py
+   ├── new_environment_v0.py
+   └── env/
+       ├── __init__.py
+       ├── new_environment.py
+       └── scenario.py
+   ```
+3. Update `pyproject.toml` to include the new package
+4. Add documentation and demo
 
 ## Configuration
 
@@ -105,26 +149,38 @@ Per agent: `Box([v, ω])` where:
 
 ## Dynamics
 
-Unicycle kinematics:
+The agents follow unicycle kinematics:
+
 ```
 dx/dt = v * cos(θ)
 dy/dt = v * sin(θ)
 dθ/dt = ω
 ```
 
+Where:
+- `(x, y)`: Agent position in world coordinates
+- `θ`: Agent orientation (radians)
+- `v`: Linear velocity (control input)
+- `ω`: Angular velocity (control input)
+
 ## Rewards
 
-Default: Negative distance to nearest landmark
-- `reward = -min(||agent_position - landmark_position||)`
-- Encourages agents to approach landmarks
+Default reward function:
+```
+reward = -min(||agent_position - task_position||)
+```
+
+This encourages agents to minimize distance to their nearest task location, providing a learning signal for the assignment problem.
 
 ## Rendering
 
-- Custom pyglet-based renderer (MPE-style)
-- Arrowheads show agent orientation
-- Red circles show landmarks
-- Camera auto-zooms to fit all entities
-- Requires pyglet >= 1.5, < 2.0 (legacy OpenGL)
+The environment includes visual rendering with:
+- **Agents**: Colored arrowheads indicating position and orientation
+- **Tasks**: Red circles showing task locations
+- **Auto-zoom camera**: View adjusts to fit all entities
+- **Render modes**: `"human"` (window) or `"rgb_array"` (for recording)
+
+Rendering requires `pyglet >= 1.5, < 2.0`
 
 ## Dependencies
 
@@ -134,6 +190,28 @@ Default: Negative distance to nearest landmark
 - scipy >= 1.10
 - pyglet >= 1.5, < 2.0
 
+## Citation
+
+If you use these environments in your research, please cite:
+
+```bibtex
+@software{nhmrs2025,
+  title={NHMRS: Non-Holonomic Mobile Robot Systems Environments for Multi-Agent Reinforcement Learning},
+  author={NHMRS Project},
+  year={2025},
+  url={https://github.com/yourusername/nhmrs}
+}
+```
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
 ## License
 
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built using [PettingZoo](https://pettingzoo.farama.org/) framework
+- Rendering inspired by Multi-Agent Particle Environment (MPE)

@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nhmrs"
+version = "0.1.0"
+description = "PettingZoo environments for Non-Holonomic Mobile Robot Systems (NHMRS) task allocation"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "NHMRS Project"}
+]
+keywords = [
+    "reinforcement-learning",
+    "multi-agent",
+    "robotics",
+    "task-allocation",
+    "pettingzoo",
+    "non-holonomic",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Robotics",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "pettingzoo>=1.24.0",
+    "gymnasium>=0.29.0",
+    "numpy>=1.23",
+    "scipy>=1.10",
+    "pyglet>=1.5,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "flake8>=4.0",
+    "isort>=5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/nhmrs"
+Documentation = "https://github.com/yourusername/nhmrs/blob/main/README.md"
+Repository = "https://github.com/yourusername/nhmrs"
+Issues = "https://github.com/yourusername/nhmrs/issues"
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
