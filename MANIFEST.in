@@ -3,8 +3,9 @@ include README.md
 include CHANGELOG.md
 include CONTRIBUTING.md
 include requirements.txt
-recursive-include simple_assignment *.py
-prune simple_assignment/__pycache__
-prune simple_assignment/env/__pycache__
+include STRUCTURE.md
+recursive-include nhmrs *.py
+recursive-include docs *.py
+prune tests
 global-exclude *.pyc
 global-exclude __pycache__

@@ -1,14 +1,8 @@
 """Demo: 3 robots moving in circles to verify rendering."""
-import sys
 import time
 import numpy as np
-from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
-
-from simple_assignment.env.scenario import Scenario
-from simple_assignment.simple_assignment_v0 import env
+from nhmrs import simple_assignment_v0
 
 
 def circle_policy(agent_id, obs, t):
@@ -30,9 +24,8 @@ def main():
     print("\nStarting visualization...")
     print("Close the window or wait 15 seconds to exit.\n")
     
-    # Create scenario and environment
-    scenario = Scenario()
-    environment = env(scenario=scenario, render_mode="human", max_steps=500)
+    # Create environment
+    environment = simple_assignment_v0.env(render_mode="human", max_steps=500)
     
     obs, info = environment.reset(seed=42)
     

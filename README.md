@@ -41,61 +41,129 @@ pip install nhmrs
 ## Quick Start
 
 ```python
-from simple_assignment.simple_assignment_v0 import env
-from simple_assignment.env.scenario import Scenario
+from nhmrs import simple_assignment_v0
 
 # Create environment
-scenario = Scenario()
-e = env(scenario=scenario, render_mode="human")
+env = simple_assignment_v0.env(render_mode="human")
 
 # Run episode
-obs, info = e.reset(seed=42)
+obs, info = env.reset(seed=42)
 for _ in range(100):
-    actions = {agent: e.action_space(agent).sample() for agent in e.agents}
-    obs, rewards, terminated, truncated, info = e.step(actions)
-    e.render()
+    actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+    obs, rewards, terminated, truncated, info = env.step(actions)
+    env.render()
     if all(terminated.values()) or all(truncated.values()):
         break
-e.close()
+env.close()
 ```
 
-## Demo
+### Using Different Kinematic Models
 
-Run the included demo to see 3 robots with circular motion policies:
+```python
+from nhmrs import simple_assignment_v0
+from nhmrs._nhmrs_utils.kinematics import DifferentialDriveKinematics
+
+# Create environment with differential drive kinematics
+kinematics = DifferentialDriveKinematics(wheelbase=0.2, dt=0.1)
+env = simple_assignment_v0.env(kinematics=kinematics, render_mode="human")
+
+obs, info = env.reset(seed=42)
+# ... rest of code
+```
+
+## Demos
+
+Run the included demos to see robots with different kinematic models:
 
 ```bash
-python demo.py
+# Basic demo with 3 robots in circular motion
+python docs/demo.py
+
+# Compare different kinematic models (unicycle, differential drive, ackermann)
+python docs/demo_kinematics.py
 ```
 
-The demo shows agents (colored arrowheads) moving toward task locations (red circles).
+The demos show agents (colored arrowheads) moving toward task locations (red circles).
 
 ## Project Structure
 
 ```
 nhmrs/
-├── simple_assignment/              # Simple assignment environment
-│   ├── __init__.py
-│   ├── simple_assignment_v0.py    # Environment entry point
-│   └── env/
-│       ├── __init__.py
-│       ├── simple_assignment.py   # Core environment logic
-│       ├── rendering.py           # Visualization
-│       └── scenario.py            # Initial configuration
-├── demo.py                        # Demo script
-├── requirements.txt               # Dependencies
-├── setup.py                       # Setup script
-├── pyproject.toml                 # Modern Python config
-└── README.md                      # This file
+├── nhmrs/                          # Main package
+│   ├── __init__.py                 # Package-level exports
+│   ├── _nhmrs_utils/               # Shared utilities (MPE2-inspired)
+│   │   ├── __init__.py
+│   │   ├── core.py                 # Core abstractions (Entity, Agent, World)
+│   │   ├── scenario.py             # Base scenario interface
+│   │   ├── rendering.py            # Pygame-based rendering utilities
+│   │   └── kinematics/             # Kinematic models
+│   │       ├── __init__.py
+│   │       ├── base.py             # Abstract base class
+│   │       ├── unicycle.py         # Unicycle model
+│   │       ├── differential_drive.py  # Differential drive model
+│   │       └── ackermann.py        # Ackermann steering model
+│   ├── simple_assignment/          # Simple assignment environment
+│   │   ├── __init__.py
+│   │   └── simple_assignment.py    # Environment + scenario implementation
+│   └── simple_assignment_v0.py     # Top-level convenience import
+├── demo.py                         # Basic demo script
+├── tests/                          # Test suite (14 tests, all passing)
+│   ├── test_kinematics.py          # Kinematic model tests (5 tests)
+│   └── test_simple_assignment.py   # Environment tests (9 tests)
+├── requirements.txt                # Dependencies
+├── setup.py                        # Setup script
+├── pyproject.toml                  # Modern Python config (PEP 518)
+├── ABSTRACTIONS.md                 # Core abstractions documentation
+├── STRUCTURE.md                    # Design decisions
+├── LICENSE                         # MIT License
+└── README.md                       # This file
+```
+
+## Core Abstractions
+
+NHMRS follows an MPE2-inspired design with core abstractions adapted for non-holonomic robotics:
+
+- **Entity**: Base class for all world objects (agents, landmarks)
+- **Agent**: Controllable entity with kinematics model
+- **Landmark**: Static entity representing task locations
+- **World**: Container managing all entities and stepping simulation
+- **Scenario**: Defines task-specific world configuration and rewards
+
+For detailed documentation, see [ABSTRACTIONS.md](ABSTRACTIONS.md).
+
+### Key Differences from MPE2
+
+NHMRS uses **kinematic models** instead of force-based physics:
+
+| Aspect | MPE2 (Point Mass) | NHMRS (Non-Holonomic) |
+|--------|-------------------|------------------------|
+| State | `[x, y, vx, vy]` | `[x, y, θ]` |
+| Action | Forces `[fx, fy]` | Kinematic controls `[v, ω]` |
+| Dynamics | Force integration | Kinematic stepping |
+| Constraints | None (holonomic) | Non-holonomic (orientation) |
+
+### Kinematics Models
+
+The `nhmrs._nhmrs_utils.kinematics` package provides reusable kinematic models:
+
+```python
+from nhmrs._nhmrs_utils.kinematics import UnicycleKinematics, DifferentialDriveKinematics, AckermannKinematics
+from nhmrs import simple_assignment_v0
+import numpy as np
+
+# Use with any environment
+unicycle = UnicycleKinematics(dt=0.1, v_max=2.0, omega_max=np.pi)
+env = simple_assignment_v0.env(kinematics=unicycle)
 ```
 
 ### Adding New Environments
 
 To add a new environment to the package:
 
-1. Create a new directory: `nhmrs/new_environment/`
+1. Create a new directory under `nhmrs/`: `nhmrs/new_environment/`
 2. Structure it following PettingZoo conventions:
    ```
-   new_environment/
+   nhmrs/new_environment/
    ├── __init__.py
    ├── new_environment_v0.py
    └── env/
@@ -103,8 +171,10 @@ To add a new environment to the package:
        ├── new_environment.py
        └── scenario.py
    ```
-3. Update `pyproject.toml` to include the new package
-4. Add documentation and demo
+3. Import kinematics from `nhmrs.kinematics`
+4. Update `pyproject.toml` to include the new packages
+5. Add documentation and demo in `docs/`
+6. Follow the MPE2-style structure for consistency
 
 ## Configuration
 
@@ -180,7 +250,7 @@ The environment includes visual rendering with:
 - **Auto-zoom camera**: View adjusts to fit all entities
 - **Render modes**: `"human"` (window) or `"rgb_array"` (for recording)
 
-Rendering requires `pyglet >= 1.5, < 2.0`
+Rendering uses pygame for visualization.
 
 ## Dependencies
 
@@ -188,7 +258,7 @@ Rendering requires `pyglet >= 1.5, < 2.0`
 - gymnasium >= 0.29.0
 - numpy >= 1.23
 - scipy >= 1.10
-- pyglet >= 1.5, < 2.0
+- pygame >= 2.0
 
 ## Citation
 
@@ -197,9 +267,9 @@ If you use these environments in your research, please cite:
 ```bibtex
 @software{nhmrs2025,
   title={NHMRS: Non-Holonomic Mobile Robot Systems Environments for Multi-Agent Reinforcement Learning},
-  author={NHMRS Project},
+  author={Dan Novischi},
   year={2025},
-  url={https://github.com/yourusername/nhmrs}
+  url={https://github.com/dnovischi/nhmrs}
 }
 ```
 

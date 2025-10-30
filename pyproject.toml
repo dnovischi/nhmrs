@@ -38,7 +38,7 @@ dependencies = [
     "gymnasium>=0.29.0",
     "numpy>=1.23",
     "scipy>=1.10",
-    "pyglet>=1.5,<2.0",
+    "pygame>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -62,3 +62,15 @@ target-version = ['py38', 'py39', 'py310', 'py311']
 [tool.isort]
 profile = "black"
 line_length = 100
+
+[tool.setuptools]
+packages = [
+    "nhmrs",
+    "nhmrs._nhmrs_utils",
+    "nhmrs._nhmrs_utils.kinematics",
+    "nhmrs.simple_assignment",
+]
+package-dir = {"" = "."}
+
+[tool.setuptools.package-data]
+nhmrs = ["*.md"]
