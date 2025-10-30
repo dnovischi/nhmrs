@@ -1,12 +1,29 @@
 """Simple Assignment v0 - NHMRS Task Allocation Environment.
 
-A PettingZoo environment where non-holonomic mobile robots must be assigned
-to tasks/landmarks to minimize total cost. Supports multiple kinematic models.
+This module implements a PettingZoo ParallelEnv for multi-agent task allocation
+where N non-holonomic mobile robots must visit M landmarks (tasks). The environment
+supports arbitrary kinematic models (unicycle, differential drive, Ackermann) and
+provides a modular reward function that adapts to different N/M ratios.
+
+Key Features:
+    - Kinematic models: Pluggable dynamics (unicycle, diff-drive, ackermann)
+    - Reward modes: 'simple' (fast), 'balanced' (default), 'patrol' (N < M)
+    - Auto-zoom rendering: Camera automatically fits all entities
+    - PettingZoo ParallelEnv API: Compatible with standard MARL libraries
+
+Environment Structure:
+    - Agents: Non-holonomic robots with [x, y, θ] state
+    - Landmarks: Static task locations [x, y]
+    - Observations: own_state + all_landmark_positions + other_agent_states
+    - Actions: Kinematic controls (e.g., [v, ω] for unicycle)
+    - Rewards: Modular multi-component (see SimpleAssignmentReward)
 
 Example:
     >>> from nhmrs import simple_assignment_v0
     >>> env = simple_assignment_v0.env(render_mode="human")
     >>> obs, info = env.reset(seed=42)
+    >>> actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+    >>> obs, rewards, terminated, truncated, info = env.step(actions)
 """
 
 import numpy as np
@@ -36,24 +53,59 @@ except ImportError:
 
 
 def make_env(raw_env):
-    """Wrap raw environment with standard PettingZoo wrappers."""
+    """Wrap raw environment with standard PettingZoo wrappers.
+    
+    Creates a factory function that instantiates the environment with given kwargs.
+    This is the standard PettingZoo pattern for environment registration.
+    
+    Args:
+        raw_env: The raw ParallelEnv class to wrap
+        
+    Returns:
+        Callable: Factory function that creates environment instances
+    """
     def env_fn(**kwargs):
         return raw_env(**kwargs)
     return env_fn
 
 
 class raw_env(ParallelEnv, EzPickle):
-    """NHMRS Simple Assignment Environment (raw).
+    """Raw PettingZoo ParallelEnv for task allocation with non-holonomic robots.
     
-    A task allocation environment where non-holonomic agents must be assigned
-    to task locations to minimize total travel cost.
+    This is the core environment implementing the PettingZoo parallel API.
+    N agents (default 3) navigate to M landmarks (default 4) arranged in a circle.
+    Each agent receives its own state, all landmark positions, and other agents' states.
+    
+    The environment uses a World container (from core.py) to manage agent states
+    and apply kinematic updates each step. Rewards are computed by a Scenario object
+    that delegates to a SimpleAssignmentReward instance.
+    
+    Observation Space (per agent):
+        Box with shape (state_dim + 2*M + state_dim*(N-1),)
+        - Own state: [x, y, θ] (or [x, y] for holonomic)
+        - Landmark positions: [x1, y1, x2, y2, ..., xM, yM]
+        - Other agents: [x_j, y_j, θ_j for j != i]
+    
+    Action Space (per agent):
+        Box defined by kinematics.get_action_bounds()
+        - Unicycle: [v, ω] linear and angular velocity
+        - Differential drive: [v_left, v_right] wheel velocities
+        - Ackermann: [v, δ] speed and steering angle
+    
+    Attributes:
+        scenario (Scenario): Manages world creation, reset, reward, and observations
+        world (World): Container for agents, landmarks, and step logic
+        max_steps (int): Episode truncation limit
+        render_mode (str | None): "human", "rgb_array", or None
+        viewer (Viewer | None): Pygame rendering window (created on first render)
     
     Args:
-        scenario: Scenario object for world configuration (optional)
-        render_mode: "human", "rgb_array", or None
-        max_steps: Maximum steps per episode (default: 500)
-        kinematics: KinematicsModel instance (default: UnicycleKinematics)
-        agent_size: Visual size of agents for rendering (default: 0.075)
+        scenario: Scenario object for world configuration. If None, uses default
+            Scenario() with 3 agents and 4 landmarks.
+        render_mode: Rendering mode - "human" for window, "rgb_array" for numpy
+        max_steps: Maximum steps before episode truncation (default 500)
+        kinematics: KinematicsModel instance shared by all agents (default UnicycleKinematics)
+        agent_size: Visual radius for rendering agents (default 0.075)
     """
     
     metadata = {
@@ -121,6 +173,24 @@ class raw_env(ParallelEnv, EzPickle):
         self._agent_transforms = []
     
     def reset(self, seed=None, options=None):
+        """Reset the environment to initial state.
+        
+        Steps:
+            1) Seed the RNG if provided
+            2) Reset agent list and spaces
+            3) Call scenario.reset_world() to place agents/landmarks
+            4) Reset timestep counter
+            5) Compute initial observations
+        
+        Args:
+            seed: Random seed for reproducibility
+            options: Additional options (unused, for PettingZoo compatibility)
+            
+        Returns:
+            tuple: (observations, infos)
+                - observations: Dict mapping agent_name -> observation array
+                - infos: Dict mapping agent_name -> info dict (empty)
+        """
         if seed is not None:
             self._rng.seed(seed)
         
@@ -137,6 +207,27 @@ class raw_env(ParallelEnv, EzPickle):
         return obs, info
     
     def step(self, actions):
+        """Advance the environment by one timestep.
+        
+        Steps:
+            1) Set action.u for each agent from the actions dict
+            2) Call world.step() to apply kinematics updates
+            3) Increment timestep counters (env and world)
+            4) Compute rewards via scenario.reward()
+            5) Check termination (never terminates early, only truncates at max_steps)
+            6) Collect observations
+        
+        Args:
+            actions: Dict mapping agent_name -> action array (kinematic controls)
+        
+        Returns:
+            tuple: (observations, rewards, terminated, truncated, infos)
+                - observations: Dict[agent_name, obs_array]
+                - rewards: Dict[agent_name, float]
+                - terminated: Dict[agent_name, bool] (always False, no early termination)
+                - truncated: Dict[agent_name, bool] (True when t >= max_steps)
+                - infos: Dict[agent_name, dict] (empty)
+        """
         # Set actions for each agent
         for agent_obj in self.world.agents:
             if agent_obj.name in actions:
@@ -168,6 +259,15 @@ class raw_env(ParallelEnv, EzPickle):
         return obs, rewards, terminated, truncated, info
     
     def _get_obs(self):
+        """Collect observations for all active agents.
+        
+        Delegates to scenario.observation() which constructs:
+            [own_x, own_y, own_θ, lm1_x, lm1_y, ..., lmM_x, lmM_y,
+             other1_x, other1_y, other1_θ, ..., otherN_x, otherN_y, otherN_θ]
+        
+        Returns:
+            Dict[str, np.ndarray]: Observations keyed by agent name
+        """
         obs = {}
         for agent_obj in self.world.agents:
             if agent_obj.name in self.agents:
@@ -175,6 +275,22 @@ class raw_env(ParallelEnv, EzPickle):
         return obs
     
     def render(self):
+        """Render the current state to screen or RGB array.
+        
+        Steps:
+            1) Create viewer if first call (lazy initialization)
+            2) Compute auto-zoom bounds to fit all agents and landmarks
+            3) Update agent transforms (position and orientation)
+            4) Draw landmarks as one-time geometries
+            5) Render and return (None for human mode, array for rgb_array mode)
+        
+        The camera automatically zooms to fit all entities with 1.0 world unit margin.
+        Agents are drawn as colored arrowheads with gray collision circles.
+        Landmarks are drawn as red circles.
+        
+        Returns:
+            np.ndarray | None: RGB array (H, W, 3) if render_mode="rgb_array", else None
+        """
         if self.render_mode is None:
             return None
         
@@ -182,7 +298,7 @@ class raw_env(ParallelEnv, EzPickle):
             self.viewer = Viewer(700, 700)
             self._setup_rendering()
         
-        # Auto-zoom to fit all entities (similar to MPE2)
+        # Auto-zoom to fit all entities
         all_pos = []
         for agent in self.world.agents:
             all_pos.append(agent.state.p_pos)
@@ -201,7 +317,7 @@ class raw_env(ParallelEnv, EzPickle):
             min_y -= margin
             max_y += margin
             
-            # Ensure aspect ratio
+            # Ensure aspect ratio (square viewport)
             cx, cy = (min_x + max_x) / 2, (min_y + max_y) / 2
             w, h = max_x - min_x, max_y - min_y
             size = max(w, h) / 2
@@ -227,7 +343,17 @@ class raw_env(ParallelEnv, EzPickle):
         return self.viewer.render(return_rgb_array=(self.render_mode == "rgb_array"))
     
     def _setup_rendering(self):
-        """Create persistent agent geometries using core rendering utilities."""
+        """Create persistent agent geometries (called once on first render).
+        
+        For each agent:
+            1) Create collision circle (gray outline) and arrowhead (agent color)
+            2) Both share a Transform that will be updated each frame
+            3) Add to viewer (circle first so arrow draws on top)
+            4) Store transform reference for position/rotation updates
+        
+        Agents are rendered as colored arrowheads inscribed in gray circles.
+        The arrowhead shows orientation, the circle shows collision radius.
+        """
         self._agent_geoms = []
         self._agent_transforms = []
         self._agent_circles = []
@@ -264,13 +390,25 @@ parallel_env = raw_env
 
 
 class Scenario(BaseScenario):
-    """Simple Assignment scenario using core NHMRS abstractions with modular rewards."""
+    """Scenario for task allocation with configurable reward modes.
+    
+    Manages world creation, reset, observation, and reward computation.
+    The scenario uses a SimpleAssignmentReward instance configured for one
+    of three regimes:
+        - 'simple': Fast learning with only assignment and collision
+        - 'balanced': Full multi-component reward (default)
+        - 'patrol': Emphasizes coverage and idleness for N < M scenarios
+    
+    Attributes:
+        reward_mode (str): One of 'simple', 'balanced', 'patrol'
+        reward_computer (SimpleAssignmentReward): Computes per-agent rewards
+    """
     
     def __init__(self, reward_mode='simple'):
         """Initialize scenario with reward configuration.
         
         Args:
-            reward_mode: 'simple', 'balanced', or 'patrol'
+            reward_mode: Reward weighting preset:
                 - 'simple': Assignment + collision only (fast learning)
                 - 'balanced': Full reward with all components (default weights)
                 - 'patrol': Optimized for N < M persistent coverage
@@ -279,15 +417,29 @@ class Scenario(BaseScenario):
         self.reward_computer = None
     
     def make_world(self, n_agents=3, n_landmarks=4):
-        """Create world with agents and landmarks."""
+        """Create world with agents and landmarks.
+        
+        Constructs a World object with N agents and M landmarks. Agents are
+        assigned sequential names (agent_0, agent_1, ...) and distinct colors.
+        Landmarks are given sequential names (landmark_0, landmark_1, ...).
+        
+        Kinematics are not set here - the environment will assign them during init.
+        
+        Args:
+            n_agents: Number of controllable agents (default 3)
+            n_landmarks: Number of task locations (default 4)
+            
+        Returns:
+            World: Populated world ready for reset
+        """
         world = World()
         
         # Create agents
         agent_colors = [
             (0.25, 0.50, 0.85),  # blue
+            (0.85, 0.85, 0.25),  # yellow
             (0.85, 0.25, 0.25),  # red
             (0.25, 0.85, 0.25),  # green
-            (0.85, 0.85, 0.25),  # yellow
             (0.85, 0.25, 0.85),  # magenta
             (0.25, 0.85, 0.85),  # cyan
         ]
@@ -304,8 +456,8 @@ class Scenario(BaseScenario):
         for i in range(n_landmarks):
             landmark = Landmark()
             landmark.name = f'landmark_{i}'
-            landmark.size = 0.25
-            landmark.color = (0.9, 0.1, 0.1)
+            landmark.size = 0.1
+            landmark.color = (0.25, 0.85, 0.85)  # cyan
             world.landmarks.append(landmark)
         
         # Initialize reward computer based on mode
@@ -348,7 +500,17 @@ class Scenario(BaseScenario):
         return world
     
     def reset_world(self, world, np_random):
-        """Initialize positions and orientations."""
+        """Initialize agent and landmark positions.
+        
+        Agents are placed randomly in [-1, 1]² with random orientations.
+        Landmarks are placed evenly around a circle of radius 3.0.
+        
+        Also resets the reward computer's internal state (visit tracking, timestep).
+        
+        Args:
+            world: World object to initialize
+            np_random: Random number generator (from env._rng)
+        """
         # Reset reward computer state
         if self.reward_computer is not None:
             self.reward_computer.reset()
@@ -368,7 +530,18 @@ class Scenario(BaseScenario):
             ], dtype=np.float32)
     
     def reward(self, agent, world):
-        """Compute reward using modular reward computer."""
+        """Compute reward for a single agent.
+        
+        Delegates to SimpleAssignmentReward.compute_reward() if available,
+        otherwise falls back to simple negative distance to nearest landmark.
+        
+        Args:
+            agent: Agent object with state.p_pos
+            world: World with agents, landmarks, and timestep
+            
+        Returns:
+            float: Scalar reward (typically negative, representing cost)
+        """
         if self.reward_computer is None:
             # Fallback to simple distance-based reward
             dists = [np.linalg.norm(agent.state.p_pos - lm.state.p_pos) 
@@ -383,7 +556,22 @@ class Scenario(BaseScenario):
         return self.reward_computer.compute_reward(agent, world)
     
     def observation(self, agent, world):
-        """Own state + landmark positions + other agent states."""
+        """Construct observation vector for one agent.
+        
+        Observation structure:
+            [own_x, own_y, own_θ,                         # 3 values
+             lm1_x, lm1_y, lm2_x, lm2_y, ..., lmM_x, lmM_y,  # 2*M values
+             other1_x, other1_y, other1_θ, ..., otherN_x, otherN_y, otherN_θ]  # 3*(N-1) values
+        
+        Total size: 3 + 2*M + 3*(N-1)
+        
+        Args:
+            agent: Agent to observe for
+            world: World with agents and landmarks
+            
+        Returns:
+            np.ndarray: Observation vector, shape (obs_dim,)
+        """
         # Own state: [x, y, theta]
         own_state = np.array([
             agent.state.p_pos[0],

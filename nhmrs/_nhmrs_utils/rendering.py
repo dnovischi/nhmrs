@@ -1,48 +1,120 @@
-"""Pygame-based renderer following MPE2 pattern."""
+"""Pygame-based 2D rendering for NHMRS environments.
+
+This module provides a simple rendering system for visualizing multi-agent
+simulations. It uses Pygame to draw geometric primitives (circles, polygons)
+with support for rotation and translation transforms.
+
+Key components:
+    - Transform: Position and rotation state for geometries
+    - Geom: Base class for drawable shapes (Circle, FilledPolygon)
+    - Viewer: Main rendering window that manages the draw loop
+    - Helper functions: make_agent_geom, make_circle, make_polygon
+
+Coordinate system:
+    - World space: arbitrary units, typically [-5, 5] for small scenes
+    - Screen space: pixels, origin at top-left (Pygame convention)
+    - Viewer handles world-to-screen transformation via set_bounds()
+
+Typical usage:
+    viewer = Viewer(700, 700)
+    viewer.set_bounds(-5, 5, -5, 5)
+    
+    # Create persistent geometries (agents)
+    circle, arrow, transform = make_agent_geom(agent_size, color)
+    viewer.add_geom(circle)
+    viewer.add_geom(arrow)
+    
+    # Each frame: update transforms, render
+    transform.set_translation(x, y)
+    transform.set_rotation(theta)
+    viewer.render()
+"""
 import numpy as np
 import pygame
 import math
 
 
 class Transform:
-    """Transform for positioning and rotating geometries."""
+    """2D transform for positioning and rotating geometries.
+    
+    Stores translation (x, y) and rotation (angle in radians) that will be
+    applied to any Geom object that has this transform attached via add_attr().
+    
+    Attributes:
+        translation (tuple[float, float]): Position offset in world coordinates.
+        rotation (float): Rotation angle in radians (CCW from +x axis).
+    """
     def __init__(self):
         self.translation = (0.0, 0.0)
         self.rotation = 0.0
 
     def set_translation(self, x, y):
+        """Set the translation offset in world coordinates."""
         self.translation = (float(x), float(y))
 
     def set_rotation(self, angle):
+        """Set the rotation angle in radians (CCW from +x)."""
         self.rotation = float(angle)
 
 
 class Geom:
-    """Base geometry class."""
+    """Base class for drawable geometry.
+    
+    All geometries maintain:
+        - color: RGB tuple (0-255 for Pygame)
+        - attrs: list of Transform objects applied during render
+    
+    Subclasses must implement render(screen, transform_func).
+    """
     def __init__(self):
         self.color = (127, 127, 127)  # RGB 0-255
         self.attrs = []
 
     def set_color(self, r, g, b, a=1.0):
-        """Set color with values in [0, 1] range."""
+        """Set color with values in [0, 1] range (converted to 0-255 internally).
+        
+        Args:
+            r, g, b: Color channels in [0.0, 1.0]
+            a: Alpha (currently unused, for compatibility)
+        """
         self.color = (int(r * 255), int(g * 255), int(b * 255))
 
     def add_attr(self, attr):
+        """Attach a Transform to this geometry."""
         self.attrs.append(attr)
 
     def render(self, screen, transform_func):
-        """Render geometry with transformations."""
+        """Render geometry to the Pygame surface.
+        
+        Args:
+            screen: Pygame surface to draw on
+            transform_func: Callable (x, y) -> (screen_x, screen_y)
+        """
         raise NotImplementedError
 
 
 class FilledPolygon(Geom):
-    """Filled polygon geometry."""
+    """Filled polygon with black border.
+    
+    Vertices are stored in world coordinates and transformed on each render.
+    
+    Args:
+        vertices: List of (x, y) tuples in world coordinates
+    """
     def __init__(self, vertices):
         super().__init__()
         self.vertices = [(float(x), float(y)) for x, y in vertices]
 
     def render(self, screen, transform_func):
-        """Render polygon with rotation and translation."""
+        """Render polygon with rotation and translation applied.
+        
+        Steps:
+            1) Extract translation and rotation from attached Transforms
+            2) Rotate each vertex around origin
+            3) Translate to final position
+            4) Convert to screen coordinates
+            5) Draw filled polygon + black border
+        """
         # Get transform
         translation = (0.0, 0.0)
         rotation = 0.0
@@ -75,7 +147,13 @@ class FilledPolygon(Geom):
 
 
 class Circle(Geom):
-    """Circle geometry."""
+    """Circle geometry (filled or outline).
+    
+    Args:
+        radius: Circle radius in world coordinates
+        num_points: Unused (kept for compatibility)
+        filled: If True, draw filled circle; if False, draw 2px outline
+    """
     def __init__(self, radius, num_points=30, filled=True):
         super().__init__()
         self.radius = float(radius)
@@ -83,7 +161,15 @@ class Circle(Geom):
         self.filled = filled
 
     def render(self, screen, transform_func):
-        """Render circle with proper transform chain."""
+        """Render circle with proper transform chain.
+        
+        Handles multiple Transforms for cases like:
+            - Local offset (e.g., collision circle centered at agent)
+            - Agent position and rotation in world
+        
+        The center is computed by rotating local offset, then adding final translation.
+        Radius is scaled to screen space based on viewer bounds.
+        """
         # Collect all transforms and apply them in order
         local_translation = (0.0, 0.0)
         rotation = 0.0
@@ -128,7 +214,14 @@ class Circle(Geom):
 
 
 def make_polygon(vertices):
-    """Create a filled polygon geometry."""
+    """Create a filled polygon geometry.
+    
+    Args:
+        vertices: List of (x, y) tuples defining the polygon in world coordinates
+        
+    Returns:
+        FilledPolygon: Ready to attach to a Transform and add to Viewer
+    """
     return FilledPolygon(vertices)
 
 
@@ -137,8 +230,11 @@ def make_circle(radius, num_points=30, filled=True):
     
     Args:
         radius: Circle radius in world coordinates
-        num_points: Number of points for approximation (unused in pygame implementation)
-        filled: If True, draw filled circle; if False, draw outline only
+        num_points: Number of points for approximation (unused in Pygame implementation)
+        filled: If True, draw filled circle; if False, draw 2px outline only
+        
+    Returns:
+        Circle: Ready to attach to a Transform and add to Viewer
     """
     return Circle(radius, num_points, filled)
 
@@ -206,7 +302,23 @@ def make_agent_geom(agent_size, agent_color):
 
 
 class Viewer:
-    """Pygame-based viewer for rendering."""
+    """Main rendering window for NHMRS environments.
+    
+    Manages a Pygame window that displays geometric primitives (circles, polygons)
+    in a 2D world coordinate system. Handles world-to-screen coordinate transformation
+    and maintains separate lists for persistent and one-time geometries.
+    
+    Attributes:
+        width, height (int): Window size in pixels
+        screen: Pygame display surface
+        geoms (list): Persistent geometries (drawn every frame)
+        onetime_geoms (list): Temporary geometries (drawn once, then cleared)
+        bounds (tuple | None): (left, right, bottom, top) world coordinate bounds
+        isopen (bool): Whether the window is still active
+    
+    Args:
+        width, height: Window dimensions in pixels
+    """
     def __init__(self, width, height):
         self.width = int(width)
         self.height = int(height)
@@ -222,19 +334,45 @@ class Viewer:
         self.isopen = True
 
     def set_bounds(self, left, right, bottom, top):
-        """Set coordinate bounds for the view."""
+        """Set world coordinate bounds for the view.
+        
+        All world coordinates will be mapped to the window viewport. Typically
+        called once per frame for auto-zoom, or once at startup for fixed bounds.
+        
+        Args:
+            left, right: Horizontal world bounds
+            bottom, top: Vertical world bounds
+        """
         self.bounds = (float(left), float(right), float(bottom), float(top))
 
     def add_geom(self, geom):
-        """Add persistent geometry."""
+        """Add persistent geometry (drawn every frame).
+        
+        Use for agents, environment boundaries, etc. that persist across frames.
+        """
         self.geoms.append(geom)
 
     def add_onetime(self, geom):
-        """Add one-time geometry (cleared after render)."""
+        """Add one-time geometry (drawn once, then cleared).
+        
+        Use for landmarks, targets, or other objects that change each frame.
+        """
         self.onetime_geoms.append(geom)
 
     def _world_to_screen(self, x, y):
-        """Convert world coordinates to screen coordinates."""
+        """Convert world coordinates to screen (pixel) coordinates.
+        
+        Steps:
+            1) Normalize world coords to [0, 1] based on bounds
+            2) Scale to screen width/height
+            3) Flip y-axis (world y-up, screen y-down)
+        
+        Args:
+            x, y: Position in world coordinates
+            
+        Returns:
+            (screen_x, screen_y): Integer pixel coordinates
+        """
         if self.bounds:
             left, right, bottom, top = self.bounds
         else:
@@ -251,7 +389,22 @@ class Viewer:
         return (screen_x, screen_y)
 
     def render(self, return_rgb_array=False):
-        """Render the scene."""
+        """Draw all geometries and update the display.
+        
+        Steps:
+            1) Handle Pygame events (window close, etc.)
+            2) Clear screen to white
+            3) Render persistent geometries
+            4) Render and clear one-time geometries
+            5) Optionally capture RGB array
+            6) Flip display and tick clock to 30 FPS
+        
+        Args:
+            return_rgb_array: If True, return numpy array (H, W, 3) of rendered frame
+            
+        Returns:
+            np.ndarray | None: RGB array if requested, else None
+        """
         if not self.isopen:
             return None
         
@@ -285,7 +438,7 @@ class Viewer:
         return arr
 
     def close(self):
-        """Close the viewer."""
+        """Close the viewer and clean up Pygame resources."""
         if self.isopen:
             pygame.quit()
             self.isopen = False
