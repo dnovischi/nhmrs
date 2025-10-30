@@ -22,10 +22,13 @@ from nhmrs._nhmrs_utils.core import World, Agent, Landmark
 from nhmrs._nhmrs_utils.scenario import BaseScenario
 from nhmrs._nhmrs_utils.kinematics import UnicycleKinematics
 
+# Simple assignment specific imports
+from .simple_assignment_reward import SimpleAssignmentReward
+
 # Rendering imports (optional)
 try:
     from nhmrs._nhmrs_utils.rendering import (
-        Viewer, Transform, make_circle, make_polygon
+        Viewer, Transform, make_circle, make_polygon, make_agent_geom
     )
     RENDERING_AVAILABLE = True
 except ImportError:
@@ -142,13 +145,16 @@ class raw_env(ParallelEnv, EzPickle):
         # Step the world (applies kinematics for all agents)
         self.world.step()
         
+        # Update timesteps
+        self.t += 1
+        self.world.t = self.t  # Sync world timestep for reward computation
+        
         # Compute rewards using scenario
         rewards = {}
         for agent_obj in self.world.agents:
             rewards[agent_obj.name] = self.scenario.reward(agent_obj, self.world)
         
         # Check termination
-        self.t += 1
         terminated = {a: False for a in self.agents}
         truncated = {a: self.t >= self.max_steps for a in self.agents}
         
@@ -221,28 +227,23 @@ class raw_env(ParallelEnv, EzPickle):
         return self.viewer.render(return_rgb_array=(self.render_mode == "rgb_array"))
     
     def _setup_rendering(self):
-        """Create persistent agent geometries."""
+        """Create persistent agent geometries using core rendering utilities."""
         self._agent_geoms = []
         self._agent_transforms = []
+        self._agent_circles = []
         
         for agent in self.world.agents:
-            # Create arrowhead (pointing right, similar to MPE2)
-            arrow_length = agent.size * 2.0
-            arrow_width = agent.size
-            vertices = [
-                (arrow_length, 0),  # tip
-                (-arrow_length * 0.5, arrow_width),  # back top
-                (-arrow_length, 0),  # back center
-                (-arrow_length * 0.5, -arrow_width),  # back bottom
-            ]
+            # Use shared agent geometry creator from rendering utilities
+            collision_circle, arrow, transform = make_agent_geom(
+                agent.size, agent.color
+            )
             
-            arrow = make_polygon(vertices)
-            arrow.set_color(*agent.color)
-            
-            transform = Transform()
-            arrow.add_attr(transform)
-            
+            # Add geometries to viewer (circle first, then arrow - draw order matters)
+            self.viewer.add_geom(collision_circle)
             self.viewer.add_geom(arrow)
+            
+            # Store references for updates
+            self._agent_circles.append(collision_circle)
             self._agent_geoms.append(arrow)
             self._agent_transforms.append(transform)
     
@@ -263,7 +264,19 @@ parallel_env = raw_env
 
 
 class Scenario(BaseScenario):
-    """Simple Assignment scenario using core NHMRS abstractions."""
+    """Simple Assignment scenario using core NHMRS abstractions with modular rewards."""
+    
+    def __init__(self, reward_mode='simple'):
+        """Initialize scenario with reward configuration.
+        
+        Args:
+            reward_mode: 'simple', 'balanced', or 'patrol'
+                - 'simple': Assignment + collision only (fast learning)
+                - 'balanced': Full reward with all components (default weights)
+                - 'patrol': Optimized for N < M persistent coverage
+        """
+        self.reward_mode = reward_mode
+        self.reward_computer = None
     
     def make_world(self, n_agents=3, n_landmarks=4):
         """Create world with agents and landmarks."""
@@ -291,14 +304,55 @@ class Scenario(BaseScenario):
         for i in range(n_landmarks):
             landmark = Landmark()
             landmark.name = f'landmark_{i}'
-            landmark.size = 0.3
+            landmark.size = 0.25
             landmark.color = (0.9, 0.1, 0.1)
             world.landmarks.append(landmark)
+        
+        # Initialize reward computer based on mode
+        if self.reward_mode == 'simple':
+            self.reward_computer = SimpleAssignmentReward(
+                weights={
+                    'assignment': 1.0,
+                    'coverage': 0.0,
+                    'collision': 5.0,
+                    'idleness': 0.0,
+                    'efficiency': 0.0,
+                },
+                safety_radius=0.3
+            )
+        elif self.reward_mode == 'patrol':
+            self.reward_computer = SimpleAssignmentReward(
+                weights={
+                    'assignment': 0.5,
+                    'coverage': 1.0,
+                    'collision': 5.0,
+                    'idleness': 1.0,
+                    'efficiency': 0.1,
+                },
+                safety_radius=0.3,
+                visit_threshold=0.5
+            )
+        else:  # 'balanced'
+            self.reward_computer = SimpleAssignmentReward(
+                weights={
+                    'assignment': 1.0,
+                    'coverage': 0.5,
+                    'collision': 5.0,
+                    'idleness': 0.3,
+                    'efficiency': 0.1,
+                },
+                safety_radius=0.3,
+                visit_threshold=0.5
+            )
         
         return world
     
     def reset_world(self, world, np_random):
         """Initialize positions and orientations."""
+        # Reset reward computer state
+        if self.reward_computer is not None:
+            self.reward_computer.reset()
+        
         # Initialize agent positions randomly
         for agent in world.agents:
             agent.state.p_pos = np_random.uniform(-1, 1, 2).astype(np.float32)
@@ -314,10 +368,19 @@ class Scenario(BaseScenario):
             ], dtype=np.float32)
     
     def reward(self, agent, world):
-        """Negative distance to nearest landmark."""
-        dists = [np.linalg.norm(agent.state.p_pos - lm.state.p_pos) 
-                 for lm in world.landmarks]
-        return -min(dists)
+        """Compute reward using modular reward computer."""
+        if self.reward_computer is None:
+            # Fallback to simple distance-based reward
+            dists = [np.linalg.norm(agent.state.p_pos - lm.state.p_pos) 
+                     for lm in world.landmarks]
+            return -min(dists)
+        
+        # Update timestep in reward computer
+        if hasattr(world, 't'):
+            self.reward_computer.update_timestep(world.t)
+        
+        # Use modular reward computation
+        return self.reward_computer.compute_reward(agent, world)
     
     def observation(self, agent, world):
         """Own state + landmark positions + other agent states."""

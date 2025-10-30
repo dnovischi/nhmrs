@@ -95,6 +95,8 @@ class World:
         self.dim_color = 3
         # Simulation timestep
         self.dt = 0.1
+        # Current timestep (for reward computation)
+        self.t = 0
     
     @property
     def entities(self):
