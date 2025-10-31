@@ -1,20 +1,26 @@
 """Reward computation for simple assignment (task allocation) scenarios.
 
-This module implements a modular, multi-component reward function for MARL
-task allocation environments where N agents must visit M landmarks. The reward
-handles three regimes:
-    - N < M (patrol): Fewer agents than landmarks, persistent coverage needed
-    - N = M (1-to-1): One agent per landmark, optimal assignment
-    - N > M (surplus): More agents than landmarks, competition for assignments
+This module implements reward functions for MARL task allocation environments
+where N agents must visit M landmarks.
 
-Components:
+Available reward classes:
+    - SimpleAssignmentReward: Modular multi-component reward with assignment,
+      coverage, collision, idleness, and efficiency components. Handles N < M,
+      N = M, and N > M regimes.
+    - SimpleSpreadReward: MPE2-inspired reward focusing on spreading agents to
+      cover all landmarks while avoiding collisions. Simple and effective for
+      cooperative coverage tasks.
+
+Components in SimpleAssignmentReward:
     1. Assignment: Negative distance to assigned landmark (Hungarian algorithm)
     2. Coverage: Global measure of how well all landmarks are covered
     3. Collision: Soft penalty when agents are within safety_radius
     4. Idleness: Urgency-weighted reward for visiting neglected landmarks (N < M)
     5. Efficiency: Penalty for moving when already at target
 
-Each component can be weighted independently to tune learning behavior.
+SimpleSpreadReward (MPE2-style):
+    1. Occupancy: Reward for agents being close to landmarks (one agent per landmark)
+    2. Collision: Penalty for agent-agent proximity
 """
 
 import numpy as np
@@ -320,3 +326,134 @@ class SimpleAssignmentReward(BaseReward):
             )
             if min_dist < self.visit_threshold:
                 self.landmark_last_visit[landmark.name] = self.current_timestep
+
+
+class SimpleSpreadReward(BaseReward):
+    """MPE2-inspired reward for spreading agents across landmarks.
+    
+    This reward encourages agents to cooperatively spread out and occupy all
+    landmarks while avoiding collisions with each other. It is simpler than
+    SimpleAssignmentReward and well-suited for cooperative coverage tasks.
+    
+    Inspired by MPE2's simple_spread_v3 environment, this reward:
+        - Encourages each agent to get close to at least one landmark
+        - Penalizes agent-agent collisions
+        - Is symmetric (same reward structure for all agents)
+        - Does not use explicit assignment algorithms
+    
+    The total reward per agent is:
+        r_total = r_occupancy + r_collision
+    
+    Where:
+        - r_occupancy: -min(distance to all landmarks) for this agent
+        - r_collision: -sum(collision penalties with other agents)
+    
+    Attributes:
+        collision_weight (float): Weight for collision penalty component
+        agent_radius (float): Collision radius for agents (default 0.15)
+    """
+    
+    def __init__(self, collision_weight=1.0, agent_radius=0.15):
+        """Initialize spread reward with collision parameters.
+        
+        Args:
+            collision_weight: Multiplier for collision penalty (default 1.0)
+            agent_radius: Radius for agent collision detection (default 0.15)
+        """
+        self.collision_weight = collision_weight
+        self.agent_radius = agent_radius
+
+    def reset(self):
+        """Reset state tracking (no state needed for this reward)."""
+        pass
+
+    def update_timestep(self, t: int):
+        """Update timestep (not used by this reward)."""
+        pass
+
+    def compute_reward(self, agent, world) -> float:
+        """Compute total reward for a single agent.
+        
+        The reward consists of two components:
+            1) Occupancy: Negative distance to nearest landmark (encourages
+               agents to get close to landmarks)
+            2) Collision: Negative penalty for being too close to other agents
+        
+        This formulation naturally encourages spreading behavior: agents want
+        to minimize their distance to landmarks while maintaining separation
+        from other agents.
+        
+        Args:
+            agent: Agent object with state.p_pos
+            world: World object with agents and landmarks lists
+            
+        Returns:
+            float: Total reward (typically negative, higher is better)
+        """
+        # Occupancy component: negative distance to nearest landmark
+        r_occupancy = self._occupancy_reward(agent, world)
+        
+        # Collision component: penalty for being near other agents
+        r_collision = self._collision_penalty(agent, world)
+        
+        total = r_occupancy + self.collision_weight * r_collision
+        return total
+
+    def _occupancy_reward(self, agent, world) -> float:
+        """Reward for being close to landmarks.
+        
+        Returns the negative distance to the nearest landmark. This encourages
+        each agent to move toward and occupy at least one landmark. Combined
+        with collision avoidance, this naturally produces spreading behavior.
+        
+        Args:
+            agent: Agent to compute reward for
+            world: World with landmarks
+            
+        Returns:
+            float: -min_distance_to_landmarks (higher is better/closer)
+        """
+        if len(world.landmarks) == 0:
+            return 0.0
+        
+        distances = [
+            np.linalg.norm(agent.state.p_pos - landmark.state.p_pos)
+            for landmark in world.landmarks
+        ]
+        min_distance = min(distances)
+        return -min_distance
+
+    def _collision_penalty(self, agent, world) -> float:
+        """Penalty for proximity to other agents.
+        
+        For each pair of agents within 2*agent_radius distance, applies a
+        penalty proportional to how close they are. This creates a smooth
+        gradient for collision avoidance learning.
+        
+        The penalty formula when dist < 2*agent_radius:
+            penalty += 1 - (dist / (2 * agent_radius))
+        
+        This gives:
+            - penalty = 1.0 when agents are at the same position
+            - penalty = 0.0 when dist >= 2*agent_radius
+        
+        Args:
+            agent: Agent to compute penalty for
+            world: World with all agents
+            
+        Returns:
+            float: -total_penalty (0 if no collisions, negative otherwise)
+        """
+        penalty = 0.0
+        collision_threshold = 2.0 * self.agent_radius
+        
+        for other in world.agents:
+            if other is agent:
+                continue
+            
+            dist = np.linalg.norm(agent.state.p_pos - other.state.p_pos)
+            if dist < collision_threshold:
+                # Linear penalty that increases as agents get closer
+                penalty += 1.0 - (dist / collision_threshold)
+        
+        return -penalty

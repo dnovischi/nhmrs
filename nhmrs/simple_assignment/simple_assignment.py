@@ -40,7 +40,7 @@ from nhmrs._nhmrs_utils.scenario import BaseScenario
 from nhmrs._nhmrs_utils.kinematics import UnicycleKinematics
 
 # Simple assignment specific imports
-from .simple_assignment_reward import SimpleAssignmentReward
+from .simple_assignment_reward import SimpleAssignmentReward, SimpleSpreadReward
 
 # Rendering imports (optional)
 try:
@@ -393,15 +393,19 @@ class Scenario(BaseScenario):
     """Scenario for task allocation with configurable reward modes.
     
     Manages world creation, reset, observation, and reward computation.
-    The scenario uses a SimpleAssignmentReward instance configured for one
-    of three regimes:
-        - 'simple': Fast learning with only assignment and collision
-        - 'balanced': Full multi-component reward (default)
+    The scenario can use either SimpleAssignmentReward (explicit assignment
+    via Hungarian algorithm) or SimpleSpreadReward (MPE2-style cooperative
+    spreading with occupancy + collision).
+    
+    Available reward modes:
+        - 'simple': Assignment + collision only (fast learning)
+        - 'balanced': Full multi-component assignment reward (default)
         - 'patrol': Emphasizes coverage and idleness for N < M scenarios
+        - 'spread': MPE2-style occupancy + collision (no explicit assignment)
     
     Attributes:
-        reward_mode (str): One of 'simple', 'balanced', 'patrol'
-        reward_computer (SimpleAssignmentReward): Computes per-agent rewards
+        reward_mode (str): One of 'simple', 'balanced', 'patrol', 'spread'
+        reward_computer (SimpleAssignmentReward | SimpleSpreadReward): Computes per-agent rewards
     """
     
     def __init__(self, reward_mode='simple'):
@@ -412,6 +416,7 @@ class Scenario(BaseScenario):
                 - 'simple': Assignment + collision only (fast learning)
                 - 'balanced': Full reward with all components (default weights)
                 - 'patrol': Optimized for N < M persistent coverage
+                - 'spread': MPE2-style occupancy + collision (no explicit assignment)
         """
         self.reward_mode = reward_mode
         self.reward_computer = None
@@ -483,6 +488,11 @@ class Scenario(BaseScenario):
                 },
                 safety_radius=0.3,
                 visit_threshold=0.5
+            )
+        elif self.reward_mode == 'spread':
+            self.reward_computer = SimpleSpreadReward(
+                collision_weight=1.0,
+                agent_radius=0.075  # Match agent.size from make_world()
             )
         else:  # 'balanced'
             self.reward_computer = SimpleAssignmentReward(
