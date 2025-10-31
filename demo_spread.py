@@ -14,22 +14,18 @@ from nhmrs.simple_assignment.simple_assignment import Scenario, raw_env
 from nhmrs._nhmrs_utils.kinematics import UnicycleKinematics
 
 
-def circle_policy(obs, agent_id, t, num_agents):
-    """Simple circular motion policy for demonstration.
+def circle_policy(agent_id, obs):
+    """Simple policy: move forward with constant angular velocity (creates circles).
     
     Args:
-        obs: Observation vector (not used)
         agent_id: Agent index
-        t: Current timestep
-        num_agents: Total number of agents
+        obs: Observation vector (not used)
         
     Returns:
         np.ndarray: [v, omega] action
     """
-    # Each agent moves in a circle with phase offset
-    phase = 2 * np.pi * agent_id / num_agents
-    omega = 0.5 * np.sin(0.05 * t + phase)
-    v = 1.0
+    v = 0.2  # constant forward velocity
+    omega = -0.5 - agent_id * 0.2  # different rotation speed per agent
     return np.array([v, omega], dtype=np.float32)
 
 
@@ -53,7 +49,7 @@ def main():
         scenario=scenario,
         render_mode='human',
         max_steps=500,
-        kinematics=UnicycleKinematics(dt=0.1, v_max=2.0, omega_max=1.57)
+        kinematics=UnicycleKinematics(dt=0.1, v_max=2.0, omega_max=3.14)
     )
     
     # Run multiple episodes
@@ -72,7 +68,7 @@ def main():
             # Generate actions using circle policy
             actions = {}
             for i, agent in enumerate(env.agents):
-                actions[agent] = circle_policy(obs[agent], i, t, len(env.agents))
+                actions[agent] = circle_policy(i, obs[agent])
             
             # Step environment
             obs, rewards, terminated, truncated, info = env.step(actions)

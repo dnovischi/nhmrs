@@ -398,25 +398,25 @@ class Scenario(BaseScenario):
     spreading with occupancy + collision).
     
     Available reward modes:
+        - 'spread': MPE2-style occupancy + collision (default)
         - 'simple': Assignment + collision only (fast learning)
-        - 'balanced': Full multi-component assignment reward (default)
+        - 'balanced': Full multi-component assignment reward
         - 'patrol': Emphasizes coverage and idleness for N < M scenarios
-        - 'spread': MPE2-style occupancy + collision (no explicit assignment)
     
     Attributes:
-        reward_mode (str): One of 'simple', 'balanced', 'patrol', 'spread'
+        reward_mode (str): One of 'spread', 'simple', 'balanced', 'patrol'
         reward_computer (SimpleAssignmentReward | SimpleSpreadReward): Computes per-agent rewards
     """
     
-    def __init__(self, reward_mode='simple'):
+    def __init__(self, reward_mode='spread'):
         """Initialize scenario with reward configuration.
         
         Args:
             reward_mode: Reward weighting preset:
+                - 'spread': MPE2-style occupancy + collision (default)
                 - 'simple': Assignment + collision only (fast learning)
-                - 'balanced': Full reward with all components (default weights)
+                - 'balanced': Full reward with all components
                 - 'patrol': Optimized for N < M persistent coverage
-                - 'spread': MPE2-style occupancy + collision (no explicit assignment)
         """
         self.reward_mode = reward_mode
         self.reward_computer = None

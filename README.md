@@ -181,20 +181,20 @@ Customize reward components via `Scenario`:
 ```python
 from nhmrs.simple_assignment.simple_assignment import Scenario
 
+# Spread (default: MPE2-style occupancy + collision, no explicit assignment)
+scenario = Scenario(reward_mode='spread')
+env = simple_assignment_v0.env(scenario=scenario)
+
 # Simple (fast learning: assignment + collision only)
 scenario = Scenario(reward_mode='simple')
 env = simple_assignment_v0.env(scenario=scenario)
 
-# Balanced (default: full multi-component assignment reward)
+# Balanced (full multi-component assignment reward)
 scenario = Scenario(reward_mode='balanced')
 env = simple_assignment_v0.env(scenario=scenario)
 
 # Patrol (for N < M: emphasizes coverage/idleness)
 scenario = Scenario(reward_mode='patrol')
-env = simple_assignment_v0.env(scenario=scenario)
-
-# Spread (MPE2-style: occupancy + collision, no explicit assignment)
-scenario = Scenario(reward_mode='spread')
 env = simple_assignment_v0.env(scenario=scenario)
 ```
 
@@ -202,12 +202,12 @@ env = simple_assignment_v0.env(scenario=scenario)
 
 | Mode | Reward Class | Use Case | Components |
 |------|--------------|----------|------------|
+| `spread` | SimpleSpreadReward | Cooperative spreading without assignments (default) | Occupancy (distance to landmarks) + Collision |
 | `simple` | SimpleAssignmentReward | Fast learning, basic task allocation | Assignment + Collision |
 | `balanced` | SimpleAssignmentReward | General-purpose multi-component | Assignment + Coverage + Collision + Idleness + Efficiency |
 | `patrol` | SimpleAssignmentReward | Persistent coverage (N < M) | Balanced weights with high coverage/idleness |
-| `spread` | SimpleSpreadReward | Cooperative spreading without assignments | Occupancy (distance to landmarks) + Collision |
 
-**When to use `spread` mode:**
+**Why `spread` is the default:**
 
 - Symmetric reward structure (all agents receive same reward signal)
 - No need for explicit task assignment (Hungarian algorithm avoided)
